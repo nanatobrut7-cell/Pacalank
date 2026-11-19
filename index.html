@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pacalank · Speed Up Music</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#ececec;--card:#ffffff;--text:#111111;--muted:#6b6b6b;--accent:#111111;--accent-text:#ffffff;--border:#d4d4d4;--ok:#2b2b2b;--err:#8a1c1c;color-scheme:light}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background-color:var(--bg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='150'%3E%3Ctext x='20' y='95' transform='rotate(-20 120 75)' font-family='Arial Black,Arial,sans-serif' font-size='30' font-weight='900' fill='%23000' fill-opacity='0.055'%3Epacalank%3C/text%3E%3C/svg%3E");color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:.04em;font-weight:900;text-transform:lowercase}
+h1 span{display:block;font-size:.8rem;letter-spacing:.18em;font-weight:600;color:var(--muted);text-transform:uppercase;margin-top:2px}
+.card{box-shadow:0 1px 0 rgba(0,0,0,.04)}
+.speeds button.on{box-shadow:inset 0 0 0 2px #fff}
+p.sub{margin:0 0 18px;color:var(--muted);font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
+label.drop{display:block;border:2px dashed var(--border);border-radius:12px;padding:24px 12px;text-align:center;cursor:pointer;color:var(--muted)}
+label.drop strong{color:var(--text);display:block}
+input[type=file]{display:none}
+.speeds{display:flex;gap:8px;margin-top:6px}
+.speeds button{flex:1;padding:12px 0;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:1rem;font-weight:600;cursor:pointer}
+.speeds button.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+h2{font-size:.95rem;margin:0 0 8px}
+.go{width:100%;padding:14px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-text);font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:14px}
+.go.sec{background:var(--card);color:var(--text);border:1px solid var(--border);margin:10px 0 0}
+.go:disabled{opacity:.45;cursor:not-allowed}
+.item{border-top:1px solid var(--border);padding:12px 0}
+.item:first-child{border-top:0;padding-top:0}
+.item .nm{font-weight:600;word-break:break-all;font-size:.92rem}
+.item .st{font-size:.85rem;color:var(--muted);margin-top:2px}
+.item .st.err{color:var(--err)}
+.item .st.done{color:var(--ok);font-weight:600}
+.bar{height:6px;border-radius:99px;background:var(--border);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+.item audio{width:100%;margin-top:8px}
+.item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
+.note{font-size:.82rem;color:var(--muted);margin-top:8px}
+#list{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>pacalank<span>speed up music</span></h1>
+<p class="sub">Upload banyak lagu sekaligus (sampai 30), percepat x1.5 / x2 / x3, hasil MP3 dijaga di bawah 7 MB per lagu untuk Roblox.</p>
+
+<div class="card">
+  <label class="drop" for="f"><strong id="fname">Pilih lagu (maks. 30)</strong><span id="fhint">MP3, WAV, OGG, M4A, dll.</span></label>
+  <input type="file" id="f" accept="audio/*" multiple>
+</div>
+
+<div class="card">
+  <h2>Kecepatan (untuk semua lagu)</h2>
+  <div class="speeds" id="speeds">
+    <button data-s="1.5">x1.5</button>
+    <button data-s="2" class="on">x2</button>
+    <button data-s="3">x3</button>
+  </div>
+  <div class="note">Pitch ikut naik saat dipercepat (efek nightcore).</div>
+</div>
+
+<button class="go" id="go" disabled>Proses semua</button>
+
+<div class="card" id="list">
+  <div id="items"></div>
+  <button class="go sec" id="dlAll" style="display:none">Unduh semua (.zip berisi MP3)</button>
+  <div class="note" id="zipNote" style="display:none">Satu ZIP berisi semua MP3. Ekstrak dulu, lalu upload ke Roblox.</div>
+</div>
+</main>
+
+<script>
+const MAX_FILES = 30;
+const MAX_BYTES = 6.9 * 1000 * 1000;
+const BITRATES = [128,112,96,80,64,48,32];
+let files = [], speed = 2, results = [], busy = false;
+
+const $ = id => document.getElementById(id);
+const tick = () => new Promise(r => setTimeout(r, 0));
+const fmtTime = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
+
+$('f').addEventListener('change', e => {
+  files = [...e.target.files].slice(0, MAX_FILES);
+  const extra = e.target.files.length - files.length;
+  $('fname').textContent = files.length ? files.length + ' lagu dipilih' : 'Pilih lagu (maks. 30)';
+  $('fhint').textContent = files.length ? (files.length > 5 ? files.slice(0, 5).map(f => f.name).join(', ') + ' …' : files.map(f => f.name).join(', ')) + (extra > 0 ? ' (lebih dari 30 diabaikan)' : '') : 'MP3, WAV, OGG, M4A, dll.';
+  $('go').disabled = !files.length || busy;
+});
+$('speeds').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  speed = parseFloat(b.dataset.s);
+  [...$('speeds').children].forEach(x => x.classList.toggle('on', x === b));
+});
+
+function crc32(bytes) {
+  let t = crc32.t;
+  if (!t) { t = crc32.t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = t[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function makeZip(entries) { // entries: [{name, data:Uint8Array}]
+  const enc = new TextEncoder(), parts = [], central = [];
+  let off = 0;
+  for (const e of entries) {
+    const nb = enc.encode(e.name), crc = crc32(e.data), size = e.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true); lh.setUint16(26, nb.length, true);
+    parts.push(lh, nb, e.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true); ch.setUint16(28, nb.length, true);
+    ch.setUint32(42, off, true);
+    central.push(ch, nb);
+    off += 30 + nb.length + size;
+  }
+  const cdSize = central.reduce((a, p) => a + (p.byteLength), 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...central, end], { type: 'application/zip' });
+}
+
+function toInt16(f) {
+  const o = new Int16Array(f.length);
+  for (let i = 0; i < f.length; i++) { const s = Math.max(-1, Math.min(1, f[i])); o[i] = s < 0 ? s * 32768 : s * 32767; }
+  return o;
+}
+
+async function encodeMp3(buf, kbps, onProg) {
+  const ch = buf.numberOfChannels;
+  const enc = new lamejs.Mp3Encoder(ch, buf.sampleRate, kbps);
+  const L = toInt16(buf.getChannelData(0)), R = ch > 1 ? toInt16(buf.getChannelData(1)) : null;
+  const parts = [], step = 1152 * 200;
+  let lastYield = performance.now();
+  for (let i = 0; i < L.length; i += step) {
+    const out = R ? enc.encodeBuffer(L.subarray(i, i + step), R.subarray(i, i + step)) : enc.encodeBuffer(L.subarray(i, i + step));
+    if (out.length) parts.push(new Uint8Array(out));
+    if (performance.now() - lastYield > 80) { onProg(i / L.length); await tick(); lastYield = performance.now(); }
+  }
+  const last = enc.flush(); if (last.length) parts.push(new Uint8Array(last));
+  return new Blob(parts, { type: 'audio/mpeg' });
+}
+
+function makeItem(f) {
+  const d = document.createElement('div'); d.className = 'item';
+  d.innerHTML = '<div class="nm"></div><div class="st">Menunggu…</div><div class="bar"><i></i></div>';
+  d.querySelector('.nm').textContent = f.name;
+  $('items').appendChild(d);
+  return {
+    el: d,
+    st: (t, c) => { const s = d.querySelector('.st'); s.textContent = t; s.className = 'st' + (c ? ' ' + c : ''); },
+    pr: p => { d.querySelector('.bar i').style.width = Math.round(p * 100) + '%'; },
+    hideBar: () => { d.querySelector('.bar').style.display = 'none'; }
+  };
+}
+
+async function processOne(f, ui) {
+  ui.st('Membaca file…'); ui.pr(0.03); await tick();
+  const ab = await f.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  let src;
+  try { src = await new Promise((res, rej) => ctx.decodeAudioData(ab, res, () => rej(new Error('Format audio tidak didukung.')))); }
+  finally { ctx.close(); }
+  ui.pr(0.15);
+
+  const outDur = src.duration / speed;
+  const kbps = BITRATES.find(b => b <= MAX_BYTES * 8 / outDur / 1000);
+  if (!kbps) throw new Error('Terlalu panjang untuk muat di bawah 7 MB. Coba kecepatan lebih tinggi atau potong lagunya.');
+  const channels = kbps >= 64 ? Math.min(2, src.numberOfChannels) : 1;
+
+  ui.st('Mempercepat x' + speed + '…');
+  const SR = 44100;
+  const off = new OfflineAudioContext(channels, Math.ceil(outDur * SR), SR);
+  const node = off.createBufferSource();
+  node.buffer = src; node.playbackRate.value = speed;
+  node.connect(off.destination); node.start();
+  const rendered = await off.startRendering();
+  ui.pr(0.35);
+
+  ui.st('Mengompres ke MP3 (' + kbps + ' kbps)…');
+  const blob = await encodeMp3(rendered, kbps, p => ui.pr(0.35 + 0.65 * p));
+  ui.pr(1); ui.hideBar();
+
+  let name = f.name.replace(/\.[^.]+$/, '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'music';
+  name += '_x' + speed + '.mp3';
+  const mb = blob.size / 1e6;
+  ui.st('Selesai ✓ ' + mb.toFixed(2) + ' MB · ' + fmtTime(outDur) + ' · ' + kbps + ' kbps' + (channels === 1 ? ' mono' : ''), 'done');
+
+  const au = document.createElement('audio'); au.controls = true; au.src = URL.createObjectURL(blob);
+  const btn = document.createElement('button'); btn.className = 'dl'; btn.textContent = 'Unduh MP3';
+  btn.onclick = () => saveBlob(blob, name);
+  ui.el.append(au, btn);
+  return { name, blob };
+}
+
+function saveBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+async function saveZip(list, zipName) {
+  const entries = [];
+  for (const r of list) entries.push({ name: r.name, data: new Uint8Array(await r.blob.arrayBuffer()) });
+  saveBlob(makeZip(entries), zipName);
+}
+
+$('go').addEventListener('click', async () => {
+  if (!files.length || busy) return;
+  if (typeof lamejs === 'undefined') { alert('Library MP3 gagal dimuat. Muat ulang halaman.'); return; }
+  busy = true; $('go').disabled = true;
+  $('items').innerHTML = ''; $('list').style.display = 'block';
+  $('dlAll').style.display = 'none'; $('zipNote').style.display = 'none';
+  results = [];
+  const uis = files.map(makeItem);
+  for (let i = 0; i < files.length; i++) {
+    try { results.push(await processOne(files[i], uis[i])); }
+    catch (e) { uis[i].hideBar(); uis[i].st(e.message || 'Gagal diproses.', 'err'); }
+  }
+  if (results.length) {
+    $('dlAll').style.display = 'block'; $('zipNote').style.display = 'block';
+    $('dlAll').textContent = 'Unduh semua (' + results.length + ' MP3 dalam ZIP)';
+  }
+  busy = false; $('go').disabled = false;
+});
+
+$('dlAll').addEventListener('click', () => {
+  const used = new Set();
+  const list = results.map(r => { let n = r.name, k = 1; while (used.has(n)) n = r.name.replace('.mp3', '_' + (++k) + '.mp3'); used.add(n); return { name: n, blob: r.blob }; });
+  saveZip(list, 'music_speedup_x' + speed + '.zip');
+});
+</script>
+</body>
+</html>
