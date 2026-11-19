@@ -39,6 +39,11 @@ h2{font-size:.95rem;margin:0 0 8px}
 .item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 .note{font-size:.82rem;color:var(--muted);margin-top:8px}
 #list{display:none}
+.ir{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding:8px 0}.ir:first-child{border-top:0}
+.ir .in{flex:1;min-width:0}.ir .in b{display:block;font-size:.88rem;word-break:break-all}.ir .in code{font-size:.78rem;color:var(--muted)}
+.ir .ms{font-size:.8rem;font-weight:600;color:var(--muted);text-align:right;max-width:38%}
+.ir .ms.ok{color:var(--ok)}.ir .ms.bad{color:var(--err)}
+.ir button{padding:7px 12px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;font-size:.82rem;cursor:pointer}
 .rb2{padding:8px 14px;margin:0 0 10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 #testRes{font-size:.85rem;color:var(--muted)}
 .tr{border-top:1px solid var(--border);padding:10px 0}.tr:first-child{border-top:0;padding-top:0}
@@ -98,8 +103,10 @@ h2{font-size:.95rem;margin:0 0 8px}
   <button class="go sec" id="dlAll" style="display:none">Unduh semua (.zip berisi MP3)</button>
   <div id="idCard" style="display:none;margin-top:14px">
     <h2>Daftar nama &amp; ID Roblox</h2>
+    <div id="idRows"></div>
     <textarea id="idText" class="txt" rows="5" readonly style="font-family:ui-monospace,Menlo,monospace;font-size:.85rem"></textarea>
     <button class="go sec" id="copyIds" style="margin-top:0">Salin semua</button>
+    <button class="go sec" id="checkAll" style="margin-top:8px">Cek ulang moderasi semua</button>
   </div>
   <div class="note" id="zipNote" style="display:none">Satu ZIP berisi semua MP3. Ekstrak dulu, lalu upload ke Roblox.</div>
 </div>
@@ -409,7 +416,7 @@ async function robloxUpload(rec) {
     if (op.error) throw new Error(op.error.message || 'Upload ditolak Roblox.');
     const r = op.response || {};
     const aid = r.assetId || (r.path || '').split('/').pop();
-    rec.assetId = aid; renderIds();
+    rec.assetId = aid; rec.modState = (r.moderationResult && r.moderationResult.moderationState) || ''; renderIds();
     say('Berhasil ✓ Asset ID: ' + aid + ' (bisa masih dicek moderasi)', 'ok');
     return true;
   } catch (e) {
@@ -435,12 +442,51 @@ $('testProxy').addEventListener('click', async () => {
   } catch (e) { el.textContent = 'Tidak bisa terhubung ke proxy (' + (e.message || 'network') + ').'; el.style.color = 'var(--err)'; }
 });
 
-function renderIds() {
-  const lines = [...results].sort((a, b) => a.idx - b.idx).filter(r => r.assetId).map(r => r.name.replace(/\.mp3$/, '') + ' - ' + r.assetId);
-  $('idCard').style.display = lines.length ? 'block' : 'none';
-  $('idText').value = lines.join('\n');
-  $('idText').rows = Math.min(10, Math.max(3, lines.length));
+function modInfo(st) {
+  const m = { MODERATION_STATE_APPROVED: ['Lolos ✓', 'ok'], MODERATION_STATE_REJECTED: ['Ditolak ✗', 'bad'], MODERATION_STATE_REVIEWING: ['Sedang direview ⏳', ''] };
+  return m[st] || (st ? [st.replace('MODERATION_STATE_', ''), ''] : ['Belum dicek', '']);
 }
+function renderIds() {
+  const list = [...results].sort((a, b) => a.idx - b.idx).filter(r => r.assetId);
+  $('idCard').style.display = list.length ? 'block' : 'none';
+  $('idText').value = list.map(r => r.name.replace(/\.mp3$/, '') + ' - ' + r.assetId).join('\n');
+  $('idText').rows = Math.min(10, Math.max(3, list.length));
+  const box = $('idRows'); box.innerHTML = '';
+  list.forEach(r => {
+    const row = document.createElement('div'); row.className = 'ir';
+    const inf = document.createElement('div'); inf.className = 'in';
+    const nm = document.createElement('b'); nm.textContent = r.name.replace(/\.mp3$/, '');
+    const cd = document.createElement('code'); cd.textContent = r.assetId;
+    inf.append(nm, cd);
+    const [txt, cls] = r.modText ? [r.modText, r.modCls || ''] : modInfo(r.modState);
+    const ms = document.createElement('span'); ms.className = 'ms ' + cls; ms.textContent = txt;
+    const bt = document.createElement('button'); bt.textContent = 'Cek'; bt.onclick = () => checkMod(r);
+    row.append(inf, ms, bt); box.appendChild(row);
+  });
+}
+async function checkMod(rec) {
+  const key = $('apiKey').value.trim();
+  if (!key) { rec.modText = 'Isi API Key dulu'; rec.modCls = 'bad'; renderIds(); return; }
+  rec.modText = 'Mengecek…'; rec.modCls = ''; renderIds();
+  try {
+    const h = { 'x-api-key': key };
+    let res = await fetch(rbBase() + 'assets/' + rec.assetId, { headers: h });
+    let j = await res.json().catch(() => ({}));
+    if (res.ok && !j.moderationResult) {
+      res = await fetch(rbBase() + 'assets/' + rec.assetId + '?readMask=moderationResult', { headers: h });
+      j = await res.json().catch(() => ({}));
+    }
+    if (!res.ok) throw new Error(j.message || ('kode ' + res.status));
+    rec.modState = (j.moderationResult && j.moderationResult.moderationState) || '';
+    rec.modText = ''; rec.modCls = '';
+  } catch (e) { rec.modText = 'Gagal cek: ' + (e.message || 'jaringan'); rec.modCls = 'bad'; }
+  renderIds();
+}
+$('checkAll').addEventListener('click', async () => {
+  $('checkAll').disabled = true;
+  for (const r of results.filter(x => x.assetId)) { await checkMod(r); await wait(250); }
+  $('checkAll').disabled = false;
+});
 $('copyIds').addEventListener('click', async () => {
   const t = $('idText').value, b = $('copyIds');
   let ok = false;
