@@ -39,6 +39,9 @@ h2{font-size:.95rem;margin:0 0 8px}
 .item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 .note{font-size:.82rem;color:var(--muted);margin-top:8px}
 #list{display:none}
+.tr{border-top:1px solid var(--border);padding:10px 0}.tr:first-child{border-top:0;padding-top:0}
+.tr .tn{font-weight:600;font-size:.9rem;word-break:break-all}.tr .td{font-size:.8rem;color:var(--muted);margin-bottom:6px}
+.tr .tt{display:flex;gap:8px}.tr .tt input{flex:1;min-width:0;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);font-size:.95rem}
 .txt{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);font-size:.95rem;margin-bottom:8px}
 .row{display:flex;gap:8px}.row select{width:40%}.row input{flex:1}
 .item button.rb{margin:8px 0 0 8px;padding:9px 14px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-text);font-weight:600;cursor:pointer}
@@ -57,6 +60,12 @@ h2{font-size:.95rem;margin:0 0 8px}
   <input type="file" id="f" accept="audio/*" multiple>
 </div>
 
+<div class="card" id="trimCard" style="display:none">
+  <h2>Potong lagu (opsional)</h2>
+  <div class="note" style="margin:0 0 8px">Isi waktu mulai dan selesai (contoh <b>0:30</b> atau <b>45</b>). Kosongkan kalau tidak mau dipotong.</div>
+  <div id="trimRows"></div>
+</div>
+
 <div class="card">
   <h2>Kecepatan (untuk semua lagu)</h2>
   <div class="speeds" id="speeds">
@@ -69,6 +78,7 @@ h2{font-size:.95rem;margin:0 0 8px}
 
 <div class="card">
   <h2>Upload ke Roblox (opsional)</h2>
+  <input class="txt" id="proxyUrl" type="url" placeholder="Proxy URL (Cloudflare Worker), misal https://pacalank.nama.workers.dev" autocomplete="off">
   <input class="txt" id="apiKey" type="password" placeholder="API Key Open Cloud" autocomplete="off">
   <div class="row">
     <select class="txt" id="ownerType"><option value="userId">User ID</option><option value="groupId">Group ID</option></select>
@@ -103,7 +113,34 @@ $('f').addEventListener('change', e => {
   $('fname').textContent = files.length ? files.length + ' lagu dipilih' : 'Pilih lagu (maks. 30)';
   $('fhint').textContent = files.length ? (files.length > 5 ? files.slice(0, 5).map(f => f.name).join(', ') + ' …' : files.map(f => f.name).join(', ')) + (extra > 0 ? ' (lebih dari 30 diabaikan)' : '') : 'MP3, WAV, OGG, M4A, dll.';
   $('go').disabled = !files.length || busy;
+  buildTrimRows();
 });
+
+function buildTrimRows() {
+  const box = $('trimRows'); box.innerHTML = '';
+  $('trimCard').style.display = files.length ? 'block' : 'none';
+  files.forEach(f => {
+    const r = document.createElement('div'); r.className = 'tr';
+    r.innerHTML = '<div class="tn"></div><div class="td">Durasi: …</div><div class="tt"><input class="ts" inputmode="decimal" placeholder="Mulai (0:00)"><input class="te" inputmode="decimal" placeholder="Selesai"></div>';
+    r.querySelector('.tn').textContent = f.name;
+    box.appendChild(r);
+    const a = new Audio(), u = URL.createObjectURL(f);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => { r.querySelector('.td').textContent = 'Durasi: ' + fmtTime(a.duration); r.querySelector('.te').placeholder = 'Selesai (' + fmtTime(a.duration) + ')'; URL.revokeObjectURL(u); };
+    a.onerror = () => { r.querySelector('.td').textContent = 'Durasi: tidak diketahui'; URL.revokeObjectURL(u); };
+    a.src = u;
+  });
+}
+function parseTime(v) {
+  v = (v || '').trim().replace(',', '.'); if (!v) return null;
+  const p = v.split(':').map(Number);
+  if (p.some(x => isNaN(x) || x < 0)) return NaN;
+  return p.reduce((acc, x) => acc * 60 + x, 0);
+}
+function getTrim(i) {
+  const r = $('trimRows').children[i];
+  return r ? { a: parseTime(r.querySelector('.ts').value), b: parseTime(r.querySelector('.te').value) } : { a: null, b: null };
+}
 $('speeds').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   speed = parseFloat(b.dataset.s);
@@ -175,7 +212,7 @@ function makeItem(f) {
   };
 }
 
-async function processOne(f, ui) {
+async function processOne(f, ui, trim) {
   ui.st('Membaca file…'); ui.pr(0.03); await tick();
   const ab = await f.arrayBuffer();
   const AC = window.AudioContext || window.webkitAudioContext;
@@ -185,7 +222,17 @@ async function processOne(f, ui) {
   finally { ctx.close(); }
   ui.pr(0.15);
 
-  const outDur = src.duration / speed;
+  let t0 = trim && trim.a != null ? trim.a : 0, t1 = trim && trim.b != null ? trim.b : src.duration;
+  if (isNaN(t0) || isNaN(t1)) throw new Error('Format waktu potong tidak valid. Pakai contoh 0:30 atau 45.');
+  t1 = Math.min(t1, src.duration);
+  if (t0 >= t1) throw new Error('Waktu mulai harus lebih kecil dari waktu selesai.');
+  let buf = src;
+  if (t0 > 0 || t1 < src.duration) {
+    const sr = src.sampleRate, a = Math.floor(t0 * sr), b = Math.min(src.length, Math.floor(t1 * sr));
+    buf = new AudioBuffer({ length: b - a, numberOfChannels: src.numberOfChannels, sampleRate: sr });
+    for (let c = 0; c < src.numberOfChannels; c++) buf.copyToChannel(src.getChannelData(c).subarray(a, b), c);
+  }
+  const outDur = buf.duration / speed;
   const kbps = BITRATES.find(b => b <= MAX_BYTES * 8 / outDur / 1000);
   if (!kbps) throw new Error('Terlalu panjang untuk muat di bawah 7 MB. Coba kecepatan lebih tinggi atau potong lagunya.');
   const channels = kbps >= 64 ? Math.min(2, src.numberOfChannels) : 1;
@@ -194,7 +241,7 @@ async function processOne(f, ui) {
   const SR = 44100;
   const off = new OfflineAudioContext(channels, Math.ceil(outDur * SR), SR);
   const node = off.createBufferSource();
-  node.buffer = src; node.playbackRate.value = speed;
+  node.buffer = buf; node.playbackRate.value = speed;
   node.connect(off.destination); node.start();
   const rendered = await off.startRendering();
   ui.pr(0.35);
@@ -243,7 +290,7 @@ $('go').addEventListener('click', async () => {
   results = [];
   const uis = files.map(makeItem);
   for (let i = 0; i < files.length; i++) {
-    try { results.push(await processOne(files[i], uis[i])); }
+    try { results.push(await processOne(files[i], uis[i], getTrim(i))); }
     catch (e) { uis[i].hideBar(); uis[i].st(e.message || 'Gagal diproses.', 'err'); }
   }
   if (results.length) {
@@ -259,7 +306,10 @@ $('dlAll').addEventListener('click', () => {
   saveZip(list, 'music_speedup_x' + speed + '.zip');
 });
 
-const RB = 'https://apis.roblox.com/assets/v1/';
+const RB_DIRECT = 'https://apis.roblox.com/assets/v1/';
+const rbBase = () => { const p = $('proxyUrl').value.trim().replace(/\/+$/, ''); return p ? p + '/' : RB_DIRECT; };
+try { const sv = localStorage.getItem('pacalank_proxy'); if (sv) $('proxyUrl').value = sv; } catch (e) {}
+$('proxyUrl').addEventListener('change', () => { try { localStorage.setItem('pacalank_proxy', $('proxyUrl').value.trim()); } catch (e) {} });
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function robloxUpload(rec) {
   const key = $('apiKey').value.trim(), id = $('ownerId').value.trim(), type = $('ownerType').value;
@@ -275,13 +325,13 @@ async function robloxUpload(rec) {
       creationContext: { creator: { [type]: id } }
     }));
     fd.append('fileContent', rec.blob, rec.name);
-    let res = await fetch(RB + 'assets', { method: 'POST', headers: { 'x-api-key': key }, body: fd });
+    let res = await fetch(rbBase() + 'assets', { method: 'POST', headers: { 'x-api-key': key }, body: fd });
     let op = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(op.message || ('Roblox menolak (kode ' + res.status + ').'));
     const opId = (op.path || '').split('/').pop();
     for (let i = 0; i < 30 && !op.done; i++) {
       say('Menunggu Roblox memproses…'); await wait(2000);
-      res = await fetch(RB + 'operations/' + opId, { headers: { 'x-api-key': key } });
+      res = await fetch(rbBase() + 'operations/' + opId, { headers: { 'x-api-key': key } });
       op = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(op.message || ('Gagal cek status (kode ' + res.status + ').'));
     }
@@ -293,7 +343,7 @@ async function robloxUpload(rec) {
     return true;
   } catch (e) {
     const net = e instanceof TypeError;
-    say(net ? 'Gagal terhubung ke Roblox (kemungkinan diblokir CORS oleh browser). Coba lagi beberapa kali, atau upload lewat Creator Hub.' : (e.message || 'Gagal upload.'), 'bad');
+    say(net ? 'Gagal terhubung. Cek Proxy URL (harus benar dan diawali https://) dan koneksi internet. Tanpa Proxy URL, Roblox biasanya memblokir dari browser (CORS).' : (e.message || 'Gagal upload.'), 'bad');
     return false;
   } finally { rec.rb.disabled = false; }
 }
