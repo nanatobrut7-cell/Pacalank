@@ -96,6 +96,11 @@ h2{font-size:.95rem;margin:0 0 8px}
   <div id="items"></div>
   <button class="go sec" id="upAll" style="display:none">Upload semua ke Roblox</button>
   <button class="go sec" id="dlAll" style="display:none">Unduh semua (.zip berisi MP3)</button>
+  <div id="idCard" style="display:none;margin-top:14px">
+    <h2>Daftar nama &amp; ID Roblox</h2>
+    <textarea id="idText" class="txt" rows="5" readonly style="font-family:ui-monospace,Menlo,monospace;font-size:.85rem"></textarea>
+    <button class="go sec" id="copyIds" style="margin-top:0">Salin semua</button>
+  </div>
   <div class="note" id="zipNote" style="display:none">Satu ZIP berisi semua MP3. Ekstrak dulu, lalu upload ke Roblox.</div>
 </div>
 </main>
@@ -290,7 +295,7 @@ $('go').addEventListener('click', async () => {
   busy = true; $('go').disabled = true;
   $('items').innerHTML = ''; $('list').style.display = 'block';
   $('upAll').style.display = 'none'; $('dlAll').style.display = 'none'; $('zipNote').style.display = 'none';
-  results = [];
+  results = []; $('idCard').style.display = 'none';
   const uis = files.map(makeItem);
   for (let i = 0; i < files.length; i++) {
     try { results.push(await processOne(files[i], uis[i], getTrim(i))); }
@@ -344,6 +349,7 @@ async function robloxUpload(rec) {
     if (op.error) throw new Error(op.error.message || 'Upload ditolak Roblox.');
     const r = op.response || {};
     const aid = r.assetId || (r.path || '').split('/').pop();
+    rec.assetId = aid; renderIds();
     say('Berhasil ✓ Asset ID: ' + aid + ' (bisa masih dicek moderasi)', 'ok');
     return true;
   } catch (e) {
@@ -367,6 +373,21 @@ $('testProxy').addEventListener('click', async () => {
     if (r.ok && t === 'ok') { el.textContent = 'Proxy OK ✓'; el.style.color = 'var(--ok)'; }
     else { el.textContent = 'Proxy menjawab kode ' + r.status + ': ' + t.slice(0, 80); el.style.color = 'var(--err)'; }
   } catch (e) { el.textContent = 'Tidak bisa terhubung ke proxy (' + (e.message || 'network') + ').'; el.style.color = 'var(--err)'; }
+});
+
+function renderIds() {
+  const lines = results.filter(r => r.assetId).map(r => r.name.replace(/\.mp3$/, '') + ' - ' + r.assetId);
+  $('idCard').style.display = lines.length ? 'block' : 'none';
+  $('idText').value = lines.join('\n');
+  $('idText').rows = Math.min(10, Math.max(3, lines.length));
+}
+$('copyIds').addEventListener('click', async () => {
+  const t = $('idText').value, b = $('copyIds');
+  let ok = false;
+  try { await navigator.clipboard.writeText(t); ok = true; } catch (e) {}
+  if (!ok) { $('idText').select(); try { ok = document.execCommand('copy'); } catch (e) {} }
+  b.textContent = ok ? 'Tersalin ✓' : 'Gagal menyalin, tekan lama teksnya';
+  setTimeout(() => { b.textContent = 'Salin semua'; }, 1800);
 });
 </script></body>
 </html>
