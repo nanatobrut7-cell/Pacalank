@@ -39,6 +39,12 @@ h2{font-size:.95rem;margin:0 0 8px}
 .item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 .note{font-size:.82rem;color:var(--muted);margin-top:8px}
 #list{display:none}
+.txt{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);font-size:.95rem;margin-bottom:8px}
+.row{display:flex;gap:8px}.row select{width:40%}.row input{flex:1}
+.item button.rb{margin:8px 0 0 8px;padding:9px 14px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-text);font-weight:600;cursor:pointer}
+.item button:disabled{opacity:.5}
+.item .rs{font-size:.85rem;margin-top:6px;color:var(--muted);word-break:break-word}
+.item .rs.ok{color:var(--ok);font-weight:600}.item .rs.bad{color:var(--err)}
 </style>
 </head>
 <body>
@@ -61,10 +67,21 @@ h2{font-size:.95rem;margin:0 0 8px}
   <div class="note">Pitch ikut naik saat dipercepat (efek nightcore).</div>
 </div>
 
+<div class="card">
+  <h2>Upload ke Roblox (opsional)</h2>
+  <input class="txt" id="apiKey" type="password" placeholder="API Key Open Cloud" autocomplete="off">
+  <div class="row">
+    <select class="txt" id="ownerType"><option value="userId">User ID</option><option value="groupId">Group ID</option></select>
+    <input class="txt" id="ownerId" inputmode="numeric" placeholder="ID kamu / grup">
+  </div>
+  <div class="note">API Key hanya disimpan di layar ini (tidak disimpan di mana pun) dan dikirim langsung ke Roblox. Buat key di Creator Hub &rarr; Open Cloud &rarr; API Keys, beri izin <b>Assets: Read &amp; Write</b> saja. Jangan bagikan key ke orang lain. Akun harus sudah ID verified.</div>
+</div>
+
 <button class="go" id="go" disabled>Proses semua</button>
 
 <div class="card" id="list">
   <div id="items"></div>
+  <button class="go sec" id="upAll" style="display:none">Upload semua ke Roblox</button>
   <button class="go sec" id="dlAll" style="display:none">Unduh semua (.zip berisi MP3)</button>
   <div class="note" id="zipNote" style="display:none">Satu ZIP berisi semua MP3. Ekstrak dulu, lalu upload ke Roblox.</div>
 </div>
@@ -194,8 +211,12 @@ async function processOne(f, ui) {
   const au = document.createElement('audio'); au.controls = true; au.src = URL.createObjectURL(blob);
   const btn = document.createElement('button'); btn.className = 'dl'; btn.textContent = 'Unduh MP3';
   btn.onclick = () => saveBlob(blob, name);
-  ui.el.append(au, btn);
-  return { name, blob };
+  const rb = document.createElement('button'); rb.className = 'rb'; rb.textContent = 'Upload ke Roblox';
+  const rs = document.createElement('div'); rs.className = 'rs';
+  const rec = { name, blob, rb, rs };
+  rb.onclick = () => robloxUpload(rec);
+  ui.el.append(au, btn, rb, rs);
+  return rec;
 }
 
 function saveBlob(blob, filename) {
@@ -218,7 +239,7 @@ $('go').addEventListener('click', async () => {
   if (typeof lamejs === 'undefined') { alert('Library MP3 gagal dimuat. Muat ulang halaman.'); return; }
   busy = true; $('go').disabled = true;
   $('items').innerHTML = ''; $('list').style.display = 'block';
-  $('dlAll').style.display = 'none'; $('zipNote').style.display = 'none';
+  $('upAll').style.display = 'none'; $('dlAll').style.display = 'none'; $('zipNote').style.display = 'none';
   results = [];
   const uis = files.map(makeItem);
   for (let i = 0; i < files.length; i++) {
@@ -226,7 +247,7 @@ $('go').addEventListener('click', async () => {
     catch (e) { uis[i].hideBar(); uis[i].st(e.message || 'Gagal diproses.', 'err'); }
   }
   if (results.length) {
-    $('dlAll').style.display = 'block'; $('zipNote').style.display = 'block';
+    $('upAll').style.display = 'block'; $('dlAll').style.display = 'block'; $('zipNote').style.display = 'block';
     $('dlAll').textContent = 'Unduh semua (' + results.length + ' MP3 dalam ZIP)';
   }
   busy = false; $('go').disabled = false;
@@ -238,5 +259,49 @@ $('dlAll').addEventListener('click', () => {
   saveZip(list, 'music_speedup_x' + speed + '.zip');
 });
 </script>
+const RB = 'https://apis.roblox.com/assets/v1/';
+const wait = ms => new Promise(r => setTimeout(r, ms));
+async function robloxUpload(rec) {
+  const key = $('apiKey').value.trim(), id = $('ownerId').value.trim(), type = $('ownerType').value;
+  const say = (t, c) => { rec.rs.textContent = t; rec.rs.className = 'rs' + (c ? ' ' + c : ''); };
+  if (!key || !/^\d+$/.test(id)) { say('Isi API Key dan ID (angka) dulu di bagian "Upload ke Roblox".', 'bad'); return false; }
+  rec.rb.disabled = true; say('Mengirim ke Roblox…');
+  try {
+    const fd = new FormData();
+    fd.append('request', JSON.stringify({
+      assetType: 'Audio',
+      displayName: rec.name.replace(/\.mp3$/, '').slice(0, 50),
+      description: 'Uploaded via pacalank',
+      creationContext: { creator: { [type]: id } }
+    }));
+    fd.append('fileContent', rec.blob, rec.name);
+    let res = await fetch(RB + 'assets', { method: 'POST', headers: { 'x-api-key': key }, body: fd });
+    let op = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(op.message || ('Roblox menolak (kode ' + res.status + ').'));
+    const opId = (op.path || '').split('/').pop();
+    for (let i = 0; i < 30 && !op.done; i++) {
+      say('Menunggu Roblox memproses…'); await wait(2000);
+      res = await fetch(RB + 'operations/' + opId, { headers: { 'x-api-key': key } });
+      op = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(op.message || ('Gagal cek status (kode ' + res.status + ').'));
+    }
+    if (!op.done) { say('Masih diproses Roblox. Cek di Creator Hub → Audio beberapa menit lagi.'); return true; }
+    if (op.error) throw new Error(op.error.message || 'Upload ditolak Roblox.');
+    const r = op.response || {};
+    const aid = r.assetId || (r.path || '').split('/').pop();
+    say('Berhasil ✓ Asset ID: ' + aid + ' (bisa masih dicek moderasi)', 'ok');
+    return true;
+  } catch (e) {
+    const net = e instanceof TypeError;
+    say(net ? 'Gagal terhubung ke Roblox (kemungkinan diblokir CORS oleh browser). Coba lagi beberapa kali, atau upload lewat Creator Hub.' : (e.message || 'Gagal upload.'), 'bad');
+    return false;
+  } finally { rec.rb.disabled = false; }
+}
+$('upAll').addEventListener('click', async () => {
+  $('upAll').disabled = true;
+  for (const r of results) { await robloxUpload(r); }
+  $('upAll').disabled = false;
+});
+
 </body>
 </html>
