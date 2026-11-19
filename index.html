@@ -192,7 +192,7 @@ function toInt16(f) {
   return o;
 }
 
-async function encodeMp3(buf, kbps, onProg) {
+async function encodeMp3Main(buf, kbps, onProg) {
   const ch = buf.numberOfChannels;
   const enc = new lamejs.Mp3Encoder(ch, buf.sampleRate, kbps);
   const L = toInt16(buf.getChannelData(0)), R = ch > 1 ? toInt16(buf.getChannelData(1)) : null;
@@ -207,9 +207,40 @@ async function encodeMp3(buf, kbps, onProg) {
   return new Blob(parts, { type: 'audio/mpeg' });
 }
 
+
+const WSRC = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js');
+onmessage = function (e) {
+  var d = e.data, ch = d.chans.length, enc = new lamejs.Mp3Encoder(ch, d.sr, d.kbps), n = d.chans[0].length, step = 1152 * 200, parts = [];
+  function i16(f) { var o = new Int16Array(f.length); for (var i = 0; i < f.length; i++) { var s = Math.max(-1, Math.min(1, f[i])); o[i] = s < 0 ? s * 32768 : s * 32767; } return o; }
+  var L = i16(d.chans[0]), R = ch > 1 ? i16(d.chans[1]) : null, last = 0;
+  for (var i = 0; i < n; i += step) {
+    var out = R ? enc.encodeBuffer(L.subarray(i, i + step), R.subarray(i, i + step)) : enc.encodeBuffer(L.subarray(i, i + step));
+    if (out.length) parts.push(new Uint8Array(out));
+    var now = Date.now(); if (now - last > 100) { last = now; postMessage({ p: i / n }); }
+  }
+  var f = enc.flush(); if (f.length) parts.push(new Uint8Array(f));
+  postMessage({ done: true, parts: parts });
+};`;
+
+function encodeMp3(buf, kbps, onProg) {
+  return new Promise(resolve => {
+    let w;
+    try { w = new Worker(URL.createObjectURL(new Blob([WSRC], { type: 'text/javascript' }))); }
+    catch (e) { return resolve(encodeMp3Main(buf, kbps, onProg)); }
+    const chans = [];
+    for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c).slice());
+    w.onmessage = e => {
+      if (e.data.done) { w.terminate(); resolve(new Blob(e.data.parts, { type: 'audio/mpeg' })); }
+      else onProg(e.data.p);
+    };
+    w.onerror = () => { w.terminate(); resolve(encodeMp3Main(buf, kbps, onProg)); };
+    w.postMessage({ chans, sr: buf.sampleRate, kbps }, chans.map(c => c.buffer));
+  });
+}
+
 function makeItem(f) {
   const d = document.createElement('div'); d.className = 'item';
-  d.innerHTML = '<div class="nm"></div><div class="st">Menunggu…</div><div class="bar"><i></i></div>';
+  d.innerHTML = '<div class="nm"></div><div class="st">Menunggu giliran…</div><div class="bar"><i></i></div>';
   d.querySelector('.nm').textContent = f.name;
   $('items').appendChild(d);
   return {
@@ -297,10 +328,18 @@ $('go').addEventListener('click', async () => {
   $('upAll').style.display = 'none'; $('dlAll').style.display = 'none'; $('zipNote').style.display = 'none';
   results = []; $('idCard').style.display = 'none';
   const uis = files.map(makeItem);
-  for (let i = 0; i < files.length; i++) {
-    try { results.push(await processOne(files[i], uis[i], getTrim(i))); }
-    catch (e) { uis[i].hideBar(); uis[i].st(e.message || 'Gagal diproses.', 'err'); }
+  const trims = files.map((_, i) => getTrim(i));
+  const CONC = Math.max(2, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+  let next = 0;
+  async function runner() {
+    while (next < files.length) {
+      const i = next++;
+      try { const r = await processOne(files[i], uis[i], trims[i]); r.idx = i; results.push(r); }
+      catch (e) { uis[i].hideBar(); uis[i].st(e.message || 'Gagal diproses.', 'err'); }
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(CONC, files.length) }, runner));
+  results.sort((a, b) => a.idx - b.idx);
   if (results.length) {
     $('upAll').style.display = 'block'; $('dlAll').style.display = 'block'; $('zipNote').style.display = 'block';
     $('dlAll').textContent = 'Unduh semua (' + results.length + ' MP3 dalam ZIP)';
@@ -376,7 +415,7 @@ $('testProxy').addEventListener('click', async () => {
 });
 
 function renderIds() {
-  const lines = results.filter(r => r.assetId).map(r => r.name.replace(/\.mp3$/, '') + ' - ' + r.assetId);
+  const lines = [...results].sort((a, b) => a.idx - b.idx).filter(r => r.assetId).map(r => r.name.replace(/\.mp3$/, '') + ' - ' + r.assetId);
   $('idCard').style.display = lines.length ? 'block' : 'none';
   $('idText').value = lines.join('\n');
   $('idText').rows = Math.min(10, Math.max(3, lines.length));
