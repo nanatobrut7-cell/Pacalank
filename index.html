@@ -251,14 +251,35 @@ function makeItem(f) {
   };
 }
 
+let sharedCtx = null, decodeChain = Promise.resolve();
+function getCtx() {
+  if (!sharedCtx || sharedCtx.state === 'closed') { const AC = window.AudioContext || window.webkitAudioContext; sharedCtx = new AC(); }
+  return sharedCtx;
+}
+// decode satu per satu (decoder HP sering gagal kalau banyak decode bersamaan), coba ulang kalau gagal
+function decodeSerial(ab) {
+  const run = async () => {
+    let lastErr;
+    for (let t = 0; t < 3; t++) {
+      try { return await getCtx().decodeAudioData(ab.slice(0)); }
+      catch (e) {
+        lastErr = e;
+        await new Promise(r => setTimeout(r, 300 * (t + 1)));
+        if (t === 1) { try { sharedCtx.close(); } catch (_) {} sharedCtx = null; }
+      }
+    }
+    throw new Error('Format audio tidak didukung atau memori HP penuh (' + ((lastErr && lastErr.name) || 'decode') + ').');
+  };
+  const p = decodeChain.then(run);
+  decodeChain = p.catch(() => {});
+  return p;
+}
+
 async function processOne(f, ui, trim) {
   ui.st('Membaca file…'); ui.pr(0.03); await tick();
   const ab = await f.arrayBuffer();
-  const AC = window.AudioContext || window.webkitAudioContext;
-  const ctx = new AC();
-  let src;
-  try { src = await new Promise((res, rej) => ctx.decodeAudioData(ab, res, () => rej(new Error('Format audio tidak didukung.')))); }
-  finally { ctx.close(); }
+  ui.st('Membaca audio…');
+  const src = await decodeSerial(ab);
   ui.pr(0.15);
 
   let t0 = trim && trim.a != null ? trim.a : 0, t1 = trim && trim.b != null ? trim.b : src.duration;
