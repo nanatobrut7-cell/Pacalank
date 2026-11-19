@@ -258,7 +258,7 @@ $('dlAll').addEventListener('click', () => {
   const list = results.map(r => { let n = r.name, k = 1; while (used.has(n)) n = r.name.replace('.mp3', '_' + (++k) + '.mp3'); used.add(n); return { name: n, blob: r.blob }; });
   saveZip(list, 'music_speedup_x' + speed + '.zip');
 });
-</script>
+
 const RB = 'https://apis.roblox.com/assets/v1/';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function robloxUpload(rec) {
@@ -303,5 +303,5 @@ $('upAll').addEventListener('click', async () => {
   $('upAll').disabled = false;
 });
 
-</body>
+</script></body>
 </html>
