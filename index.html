@@ -60,10 +60,10 @@ h2{font-size:.95rem;margin:0 0 8px}
 <body>
 <main>
 <h1>pacalank<span>speed up music</span></h1>
-<p class="sub">Upload banyak lagu sekaligus (sampai 30), percepat x1.5 / x2 / x3, hasil MP3 dijaga di bawah 7 MB per lagu untuk Roblox.</p>
+<p class="sub">Upload banyak lagu sekaligus (sampai 50), percepat x1.5 / x2 / x3, hasil MP3 dijaga di bawah 7 MB per lagu untuk Roblox.</p>
 
 <div class="card">
-  <label class="drop" for="f"><strong id="fname">Pilih lagu (maks. 30)</strong><span id="fhint">MP3, WAV, OGG, M4A, dll.</span></label>
+  <label class="drop" for="f"><strong id="fname">Pilih lagu (maks. 50)</strong><span id="fhint">MP3, WAV, OGG, M4A, dll.</span></label>
   <input type="file" id="f" accept="audio/*" multiple>
 </div>
 
@@ -113,7 +113,7 @@ h2{font-size:.95rem;margin:0 0 8px}
 </main>
 
 <script>
-const MAX_FILES = 30;
+const MAX_FILES = 50;
 const MAX_BYTES = 6.9 * 1000 * 1000;
 const BITRATES = [128,112,96,80,64,48,32];
 let files = [], speed = 2, results = [], busy = false;
@@ -125,8 +125,8 @@ const fmtTime = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padSt
 $('f').addEventListener('change', e => {
   files = [...e.target.files].slice(0, MAX_FILES);
   const extra = e.target.files.length - files.length;
-  $('fname').textContent = files.length ? files.length + ' lagu dipilih' : 'Pilih lagu (maks. 30)';
-  $('fhint').textContent = files.length ? (files.length > 5 ? files.slice(0, 5).map(f => f.name).join(', ') + ' …' : files.map(f => f.name).join(', ')) + (extra > 0 ? ' (lebih dari 30 diabaikan)' : '') : 'MP3, WAV, OGG, M4A, dll.';
+  $('fname').textContent = files.length ? files.length + ' lagu dipilih' : 'Pilih lagu (maks. 50)';
+  $('fhint').textContent = files.length ? (files.length > 5 ? files.slice(0, 5).map(f => f.name).join(', ') + ' …' : files.map(f => f.name).join(', ')) + (extra > 0 ? ' (lebih dari 50 diabaikan)' : '') : 'MP3, WAV, OGG, M4A, dll.';
   $('go').disabled = !files.length || busy;
   buildTrimRows();
 });
