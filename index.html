@@ -39,6 +39,8 @@ h2{font-size:.95rem;margin:0 0 8px}
 .item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 .note{font-size:.82rem;color:var(--muted);margin-top:8px}
 #list{display:none}
+.rb2{padding:8px 14px;margin:0 0 10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
+#testRes{font-size:.85rem;color:var(--muted)}
 .tr{border-top:1px solid var(--border);padding:10px 0}.tr:first-child{border-top:0;padding-top:0}
 .tr .tn{font-weight:600;font-size:.9rem;word-break:break-all}.tr .td{font-size:.8rem;color:var(--muted);margin-bottom:6px}
 .tr .tt{display:flex;gap:8px}.tr .tt input{flex:1;min-width:0;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);font-size:.95rem}
@@ -78,7 +80,8 @@ h2{font-size:.95rem;margin:0 0 8px}
 
 <div class="card">
   <h2>Upload ke Roblox (opsional)</h2>
-  <input class="txt" id="proxyUrl" type="url" placeholder="Proxy URL (Cloudflare Worker), misal https://pacalank.nama.workers.dev" autocomplete="off">
+  <input class="txt" id="proxyUrl" type="url" value="https://pacalank.pacalankpamii.workers.dev" placeholder="Proxy URL (Cloudflare Worker), misal https://pacalank.nama.workers.dev" autocomplete="off">
+  <button class="rb2" id="testProxy" type="button">Tes Proxy</button> <span class="rs" id="testRes"></span>
   <input class="txt" id="apiKey" type="password" placeholder="API Key Open Cloud" autocomplete="off">
   <div class="row">
     <select class="txt" id="ownerType"><option value="userId">User ID</option><option value="groupId">Group ID</option></select>
@@ -308,8 +311,10 @@ $('dlAll').addEventListener('click', () => {
 
 const RB_DIRECT = 'https://apis.roblox.com/assets/v1/';
 const rbBase = () => { const p = $('proxyUrl').value.trim().replace(/\/+$/, ''); return p ? p + '/' : RB_DIRECT; };
-try { const sv = localStorage.getItem('pacalank_proxy'); if (sv) $('proxyUrl').value = sv; } catch (e) {}
-$('proxyUrl').addEventListener('change', () => { try { localStorage.setItem('pacalank_proxy', $('proxyUrl').value.trim()); } catch (e) {} });
+try { localStorage.removeItem('pacalank_proxy'); } catch (e) {}
+try { const o = localStorage.getItem('pacalank_owner'); if (o) $('ownerId').value = o; const t = localStorage.getItem('pacalank_otype'); if (t) $('ownerType').value = t; } catch (e) {}
+const saveOwner = () => { try { localStorage.setItem('pacalank_owner', $('ownerId').value.trim()); localStorage.setItem('pacalank_otype', $('ownerType').value); } catch (e) {} };
+$('ownerId').addEventListener('change', saveOwner); $('ownerType').addEventListener('change', saveOwner);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function robloxUpload(rec) {
   const key = $('apiKey').value.trim(), id = $('ownerId').value.trim(), type = $('ownerType').value;
@@ -343,7 +348,7 @@ async function robloxUpload(rec) {
     return true;
   } catch (e) {
     const net = e instanceof TypeError;
-    say(net ? 'Gagal terhubung. Cek Proxy URL (harus benar dan diawali https://) dan koneksi internet. Tanpa Proxy URL, Roblox biasanya memblokir dari browser (CORS).' : (e.message || 'Gagal upload.'), 'bad');
+    say(net ? 'Gagal terhubung (' + (e.message || 'network') + '). Cek Proxy URL (harus benar dan diawali https://) dan koneksi internet. Tanpa Proxy URL, Roblox biasanya memblokir dari browser (CORS). Coba tombol Tes Proxy.' : (e.message || 'Gagal upload.'), 'bad');
     return false;
   } finally { rec.rb.disabled = false; }
 }
@@ -353,5 +358,15 @@ $('upAll').addEventListener('click', async () => {
   $('upAll').disabled = false;
 });
 
+
+$('testProxy').addEventListener('click', async () => {
+  const el = $('testRes'); el.textContent = 'Menguji…'; el.style.color = '';
+  try {
+    const r = await fetch(rbBase() + 'ping');
+    const t = await r.text();
+    if (r.ok && t === 'ok') { el.textContent = 'Proxy OK ✓'; el.style.color = 'var(--ok)'; }
+    else { el.textContent = 'Proxy menjawab kode ' + r.status + ': ' + t.slice(0, 80); el.style.color = 'var(--err)'; }
+  } catch (e) { el.textContent = 'Tidak bisa terhubung ke proxy (' + (e.message || 'network') + ').'; el.style.color = 'var(--err)'; }
+});
 </script></body>
 </html>
