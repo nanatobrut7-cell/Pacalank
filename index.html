@@ -39,6 +39,13 @@ h2{font-size:.95rem;margin:0 0 8px}
 .item button.dl{margin-top:8px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;cursor:pointer}
 .note{font-size:.82rem;color:var(--muted);margin-top:8px}
 #list{display:none}
+.lr{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding:8px 0}.lr:first-child{border-top:0}
+.lr input[type=checkbox]{width:20px;height:20px;flex:none}
+.lr .in{flex:1;min-width:0}.lr .in b{display:block;font-size:.88rem;word-break:break-all}.lr .in code{font-size:.78rem;color:var(--muted)}
+.lr .ms{font-size:.8rem;font-weight:600;color:var(--muted);text-align:right;max-width:34%}
+.lr .ms.ok{color:var(--ok)}.lr .ms.bad{color:var(--err)}
+.lr button{padding:7px 12px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text);font-weight:600;font-size:.82rem;cursor:pointer}
+#libRows{max-height:420px;overflow-y:auto}
 .ir{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding:8px 0}.ir:first-child{border-top:0}
 .ir .in{flex:1;min-width:0}.ir .in b{display:block;font-size:.88rem;word-break:break-all}.ir .in code{font-size:.78rem;color:var(--muted)}
 .ir .ms{font-size:.8rem;font-weight:600;color:var(--muted);text-align:right;max-width:38%}
@@ -109,6 +116,29 @@ h2{font-size:.95rem;margin:0 0 8px}
     <button class="go sec" id="checkAll" style="margin-top:8px">Cek ulang moderasi semua</button>
   </div>
   <div class="note" id="zipNote" style="display:none">Satu ZIP berisi semua MP3. Ekstrak dulu, lalu upload ke Roblox.</div>
+</div>
+
+<div class="card" id="libCard">
+  <h2>Audio di akun Roblox</h2>
+  <div class="note" style="margin:0 0 8px">Scan semua audio milik akunmu, lalu beri izin pakai (Use) ke experience lain. Butuh Proxy URL, API Key, dan ID di kartu "Upload ke Roblox" terisi. Lagu yang baru kamu upload otomatis masuk daftar ini.</div>
+  <button class="go sec" id="scanBtn" style="margin:0 0 8px">Scan semua audio akun</button>
+  <div id="libStatus" class="note" style="margin:0 0 6px"></div>
+  <div id="libRows"></div>
+  <div id="libTools" style="display:none;margin-top:8px">
+    <button class="rb2" id="selAll" type="button">Pilih semua</button>
+    <button class="rb2" id="selNone" type="button">Kosongkan</button>
+    <button class="rb2" id="libCheck" type="button">Cek moderasi terpilih</button>
+  </div>
+  <h2 style="margin-top:16px">Beri izin</h2>
+  <select class="txt" id="pType">
+    <option value="Universe">Experience (Universe ID)</option>
+    <option value="User">User</option>
+    <option value="Group">Group</option>
+  </select>
+  <input class="txt" id="pId" inputmode="numeric" placeholder="ID experience / user / grup yang diberi izin">
+  <button class="go" id="grantBtn" style="margin-bottom:6px">Beri izin ke yang dicentang</button>
+  <div class="note" id="pStatus"></div>
+  <div class="note">API Key perlu izin <b>Asset Permissions: Write</b> (tambahkan di Creator Hub &rarr; API Keys). Izin ke User/Group belum pasti didukung Roblox untuk audio, yang pasti jalan adalah ke Experience (Universe ID).</div>
 </div>
 </main>
 
@@ -416,7 +446,7 @@ async function robloxUpload(rec) {
     if (op.error) throw new Error(op.error.message || 'Upload ditolak Roblox.');
     const r = op.response || {};
     const aid = r.assetId || (r.path || '').split('/').pop();
-    rec.assetId = aid; rec.modState = (r.moderationResult && r.moderationResult.moderationState) || ''; renderIds();
+    rec.assetId = aid; libAdd(rec); rec.modState = (r.moderationResult && r.moderationResult.moderationState) || ''; renderIds();
     say('Berhasil ✓ Asset ID: ' + aid + ' (bisa masih dicek moderasi)', 'ok');
     return true;
   } catch (e) {
@@ -467,7 +497,7 @@ function renderIds() {
 async function checkMod(rec) {
   const key = $('apiKey').value.trim();
   if (!key) { rec.modText = 'Isi API Key dulu'; rec.modCls = 'bad'; renderIds(); return; }
-  rec.modText = 'Mengecek…'; rec.modCls = ''; renderIds();
+  rec.modText = 'Mengecek…'; rec.modCls = ''; renderIds(); renderLib();
   try {
     const h = { 'x-api-key': key };
     let res = await fetch(rbBase() + 'assets/' + rec.assetId, { headers: h });
@@ -480,7 +510,7 @@ async function checkMod(rec) {
     rec.modState = (j.moderationResult && j.moderationResult.moderationState) || '';
     rec.modText = ''; rec.modCls = '';
   } catch (e) { rec.modText = 'Gagal cek: ' + (e.message || 'jaringan'); rec.modCls = 'bad'; }
-  renderIds();
+  renderIds(); renderLib();
 }
 $('checkAll').addEventListener('click', async () => {
   $('checkAll').disabled = true;
@@ -494,6 +524,103 @@ $('copyIds').addEventListener('click', async () => {
   if (!ok) { $('idText').select(); try { ok = document.execCommand('copy'); } catch (e) {} }
   b.textContent = ok ? 'Tersalin ✓' : 'Gagal menyalin, tekan lama teksnya';
   setTimeout(() => { b.textContent = 'Salin semua'; }, 1800);
+});
+
+// ===== Audio di akun Roblox: scan + beri izin =====
+const lib = [];
+function libAdd(a) {
+  const id = String(a.assetId), ex = lib.find(x => String(x.assetId) === id);
+  if (ex) return ex;
+  lib.push(a); renderLib(); return a;
+}
+function renderLib() {
+  const box = $('libRows'); box.innerHTML = '';
+  $('libTools').style.display = lib.length ? 'block' : 'none';
+  lib.forEach(x => {
+    const row = document.createElement('div'); row.className = 'lr';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!x.sel;
+    cb.onchange = () => { x.sel = cb.checked; };
+    const inf = document.createElement('div'); inf.className = 'in';
+    const nm = document.createElement('b'); nm.textContent = String(x.name || '').replace(/\.mp3$/, '');
+    const cd = document.createElement('code'); cd.textContent = x.assetId;
+    inf.append(nm, cd);
+    const [txt, cls] = x.modText ? [x.modText, x.modCls || ''] : modInfo(x.modState);
+    const ms = document.createElement('span'); ms.className = 'ms ' + cls; ms.textContent = txt;
+    const bt = document.createElement('button'); bt.textContent = 'Cek'; bt.onclick = () => checkMod(x);
+    row.append(cb, inf, ms, bt); box.appendChild(row);
+  });
+}
+const libSay = t => { $('libStatus').textContent = t; };
+const needProxy = () => !$('proxyUrl').value.trim();
+
+$('scanBtn').addEventListener('click', async () => {
+  const key = $('apiKey').value.trim();
+  if (needProxy()) { libSay('Isi Proxy URL dulu.'); return; }
+  if (!key) { libSay('Isi API Key dulu.'); return; }
+  const ot = $('ownerType').value, oid = $('ownerId').value.trim();
+  $('scanBtn').disabled = true; libSay('Memindai audio…');
+  let cursor = '', found = 0, at = 'Audio';
+  try {
+    for (let page = 0; page < 40; page++) {
+      const url = rbBase() + 'creations/get-assets?assetType=' + at + '&limit=50'
+        + (ot === 'groupId' && oid ? '&groupId=' + oid : '') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+      const res = await fetch(url, { headers: { 'x-api-key': key } });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok && page === 0 && at === 'Audio' && res.status === 400) { at = '3'; page = -1; continue; }
+      if (!res.ok) throw new Error((j && (j.message || (j.errors && j.errors[0] && j.errors[0].message))) || ('kode ' + res.status));
+      const arr = j.data || j.assets || j.items || [];
+      arr.forEach(x => {
+        const id = x.assetId != null ? x.assetId : x.id;
+        if (id != null) { libAdd({ assetId: String(id), name: x.name || x.displayName || ('Audio ' + id), sel: false }); found++; }
+      });
+      libSay('Memindai… ' + lib.length + ' audio ditemukan');
+      cursor = j.nextPageCursor || j.nextPageToken || '';
+      if (!cursor || !arr.length) break;
+    }
+    libSay(lib.length ? 'Selesai: ' + lib.length + ' audio di daftar.' : 'Tidak ada audio ditemukan.');
+  } catch (e) {
+    libSay('Gagal scan: ' + (e.message || 'jaringan') + '. Pastikan Worker sudah diperbarui dan API Key punya izin yang cukup.');
+  }
+  $('scanBtn').disabled = false; renderLib();
+});
+
+$('selAll').addEventListener('click', () => { lib.forEach(x => x.sel = true); renderLib(); });
+$('selNone').addEventListener('click', () => { lib.forEach(x => x.sel = false); renderLib(); });
+$('libCheck').addEventListener('click', async () => {
+  $('libCheck').disabled = true;
+  for (const x of lib.filter(v => v.sel)) { await checkMod(x); await wait(250); }
+  $('libCheck').disabled = false;
+});
+
+try { const pi = localStorage.getItem('pacalank_pid'); if (pi) $('pId').value = pi; const pt = localStorage.getItem('pacalank_ptype'); if (pt) $('pType').value = pt; } catch (e) {}
+
+$('grantBtn').addEventListener('click', async () => {
+  const say = t => { $('pStatus').textContent = t; };
+  const key = $('apiKey').value.trim(), sid = $('pId').value.trim(), type = $('pType').value;
+  const sel = lib.filter(x => x.sel);
+  if (needProxy()) return say('Isi Proxy URL dulu.');
+  if (!key) return say('Isi API Key dulu.');
+  if (!/^\d+$/.test(sid)) return say('Isi ID yang diberi izin (angka).');
+  if (!sel.length) return say('Centang dulu audio yang mau diberi izin.');
+  try { localStorage.setItem('pacalank_pid', sid); localStorage.setItem('pacalank_ptype', type); } catch (e) {}
+  $('grantBtn').disabled = true;
+  let done = 0;
+  try {
+    for (let i = 0; i < sel.length; i += 25) {
+      const chunk = sel.slice(i, i + 25);
+      say('Mengirim izin… ' + done + '/' + sel.length);
+      const res = await fetch(rbBase() + 'asset-permissions', {
+        method: 'PATCH',
+        headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectType: type, subjectId: sid, action: 'Use', requests: chunk.map(x => ({ assetId: Number(x.assetId), grantToDependencies: false })) })
+      });
+      const txt = await res.text();
+      if (!res.ok) { let m = txt; try { const j = JSON.parse(txt); m = j.message || (j.errors && j.errors[0] && j.errors[0].message) || txt; } catch (e) {} throw new Error(m.slice(0, 160) || ('kode ' + res.status)); }
+      done += chunk.length;
+    }
+    say('Permintaan izin terkirim untuk ' + done + ' audio ✓. Kalau API Key belum punya izin "Asset Permissions: Write", Roblox bisa menerima tanpa menerapkannya, jadi cek hasilnya di Creator Hub.');
+  } catch (e) { say('Gagal: ' + (e.message || 'jaringan') + (done ? ' (' + done + ' audio sudah terkirim)' : '')); }
+  $('grantBtn').disabled = false;
 });
 </script></body>
 </html>
