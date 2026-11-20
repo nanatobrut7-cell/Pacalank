@@ -123,6 +123,8 @@ h2{font-size:.95rem;margin:0 0 8px}
   <div class="note" style="margin:0 0 8px">Scan semua audio milik akunmu, lalu beri izin pakai (Use) ke experience lain. Butuh Proxy URL, API Key, dan ID di kartu "Upload ke Roblox" terisi. Lagu yang baru kamu upload otomatis masuk daftar ini.</div>
   <button class="go sec" id="scanBtn" style="margin:0 0 8px">Scan semua audio akun</button>
   <div id="libStatus" class="note" style="margin:0 0 6px"></div>
+  <textarea class="txt" id="manualIds" rows="2" placeholder="Atau tempel ID audio manual (satu per baris atau pisah koma)"></textarea>
+  <button class="rb2" id="addIds" type="button">Tambah ID ke daftar</button>
   <div id="libRows"></div>
   <div id="libTools" style="display:none;margin-top:8px">
     <button class="rb2" id="selAll" type="button">Pilih semua</button>
@@ -579,7 +581,10 @@ $('scanBtn').addEventListener('click', async () => {
     }
     libSay(lib.length ? 'Selesai: ' + lib.length + ' audio di daftar.' : 'Tidak ada audio ditemukan.');
   } catch (e) {
-    libSay('Gagal scan: ' + (e.message || 'jaringan') + '. Pastikan Worker sudah diperbarui dan API Key punya izin yang cukup.');
+    const m = e.message || 'jaringan';
+    libSay('Gagal scan: ' + m + (/scope/i.test(m)
+      ? '. API Key belum punya izin untuk scan. Edit key di Creator Hub dan coba tambahkan API "Legacy Asset" (legacy-asset:manage), atau tempel ID audio manual di bawah.'
+      : '. Pastikan Worker sudah diperbarui, atau tempel ID audio manual di bawah.'));
   }
   $('scanBtn').disabled = false; renderLib();
 });
@@ -621,6 +626,14 @@ $('grantBtn').addEventListener('click', async () => {
     say('Permintaan izin terkirim untuk ' + done + ' audio ✓. Kalau API Key belum punya izin "Asset Permissions: Write", Roblox bisa menerima tanpa menerapkannya, jadi cek hasilnya di Creator Hub.');
   } catch (e) { say('Gagal: ' + (e.message || 'jaringan') + (done ? ' (' + done + ' audio sudah terkirim)' : '')); }
   $('grantBtn').disabled = false;
+});
+
+$('addIds').addEventListener('click', () => {
+  const ids = ($('manualIds').value.match(/\d{6,}/g) || []);
+  let n = 0;
+  ids.forEach(id => { if (!lib.some(x => String(x.assetId) === id)) { libAdd({ assetId: id, name: 'Audio ' + id, sel: true }); n++; } });
+  libSay(ids.length ? n + ' ID ditambahkan (sudah dicentang).' : 'Tidak ada ID yang terbaca.');
+  $('manualIds').value = ''; renderLib();
 });
 </script></body>
 </html>
